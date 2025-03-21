@@ -5,142 +5,99 @@ on:
     tags:
       - 'v*'
 
-# GitHub settings / example values:
-#
-# org level vars:
-#   - PUBLIC_REGISTRY: docker.io
-# repo level vars:
-#   - PUBLIC_REGISTRY_REPO: rancher
-# repo level secrets:
-#   - PUBLIC_REGISTRY_USERNAME
-#   - PUBLIC_REGISTRY_PASSWORD
-
 jobs:
-  publish-images:
-    permissions:
-      contents: read
-      id-token: write # required for reading vault secrets and for cosign's use in ecm-distro-tools/publish-image
-    strategy:
-      matrix:
-        include:
-          # Three images are created:
-          # - Multi-arch manifest for both amd64 and arm64
-          - tag-suffix: ""
-            platforms: linux/amd64,linux/arm64
-          # - arm64 manifest
-          - tag-suffix: "-arm64"
-            platforms: linux/arm64
-          # - amd64 manifest
-          - tag-suffix: "-amd64"
-            platforms: linux/amd64
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        ref: ${{ github.ref_name}}
-    - name: Read secrets
-      uses: rancher-eio/read-vault-secrets@main
-      with:
-        secrets: |
-          secret/data/github/repo/${{ github.repository }}/dockerhub/${{ github.repository_owner }}/credentials username | PUBLIC_REGISTRY_USERNAME ;
-          secret/data/github/repo/${{ github.repository }}/dockerhub/${{ github.repository_owner }}/credentials password | PUBLIC_REGISTRY_PASSWORD ;
-          secret/data/github/repo/${{ github.repository }}/rancher-prime-registry/credentials registry | PRIME_REGISTRY ;
-          secret/data/github/repo/${{ github.repository }}/rancher-prime-registry/credentials username | PRIME_REGISTRY_USERNAME ;
-          secret/data/github/repo/${{ github.repository }}/rancher-prime-registry/credentials password | PRIME_REGISTRY_PASSWORD
-    - name: Publish images
-      uses: rancher/ecm-distro-tools/actions/publish-image@master
-      with:
-        image: eks-operator
-        tag: ${{ github.ref_name }}${{ matrix.tag-suffix }}
-        platforms: ${{ matrix.platforms }}
-        public-registry: docker.io
-        public-repo: rancher
-        public-username: ${{ env.PUBLIC_REGISTRY_USERNAME }}
-        public-password: ${{ env.PUBLIC_REGISTRY_PASSWORD }}
-        prime-registry: ${{ env.PRIME_REGISTRY }}
-        prime-repo: rancher
-        prime-username: ${{ env.PRIME_REGISTRY_USERNAME }}
-        prime-password: ${{ env.PRIME_REGISTRY_PASSWORD }}
-        make-target: image-push
-        push-to-prime: true
-    - name: Cleanup checksum files # in order to avoid goreleaser dirty state error, remove once rancher/ecm-distro-tools/actions/publish-image@main gets updated
-      run: rm -f slsactl_*_checksums.txt*
-
   release:
     permissions:
-      contents: write # required for creating GH release
+      contents: write  # required for creating GH release and pushing branches
     runs-on: ubuntu-latest
-    needs: publish-images
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
         ref: ${{ github.ref_name}}
+        
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
     - name: Create release
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # required for creating GH release
-        GORELEASER_CURRENT_TAG: ${{ github.ref_name }} # specify the tag to be released
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # This is provided by GitHub automatically
+        GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       id: goreleaser
       uses: goreleaser/goreleaser-action@v6
       with:
         distribution: goreleaser
         version: "~> v2"
         args: release --clean --verbose
-    - name: Upload charts to release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # required for updating GH release
-        REPO: rancher # First name component for Docker repository to reference in `values.yaml` of the Helm chart release, this is expected to be `rancher`, image name is appended to this value
-        TAG: ${{ github.ref_name }} # image tag to be referenced in `values.yaml` of the Helm chart release
-      run: |
-        version=$(echo '${{ steps.goreleaser.outputs.metadata }}' | jq -r '.version')
-        echo "Publishing helm charts (version: $version)"
-        # Both version and appVersion are set to the same value in the Chart.yaml (excluding the 'v' prefix)
-        CHART_VERSION=$version GIT_TAG=$version make charts
-        for f in $(find bin/ -name '*.tgz'); do
-          echo "Uploading $f to GitHub release $TAG"
-          gh release upload $TAG $f
-        done
-        echo "Charts successfully uploaded to GitHub release $TAG"
+        
     - name: Add charts to branch
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        version=$(echo '${{ steps.goreleaser.outputs.metadata }}' | jq -r '.version')
+        # Extract version from tag (e.g., v1.0.8-rc2 -> 1.0.8-rc2)
+        version=${GITHUB_REF_NAME#v}
         branch_version=v$(echo "$version" | cut -d'.' -f1,2)
         charts_branch=charts/$branch_version
-
-        if [ ! -e ~/.gitconfig ]; then
-          git config --global user.name "eks-operator-bot"
-          git config --global user.email eks-operator@suse.de
-        fi
-
-        echo "Publishing helm chart in the branch $charts_branch"
+        
+        echo "Preparing to create/update branch: $charts_branch"
+        
+        # Set up Git identity
+        git config --global user.name "GitHub Actions Bot"
+        git config --global user.email "actions@github.com"
+        
+        # Create mock chart directory and files for testing
+        mkdir -p test-charts/eks-operator
+        
+        # Create a simple Chart.yaml file
+        cat > test-charts/eks-operator/Chart.yaml <<EOF
+apiVersion: v2
+name: eks-operator
+description: A Helm chart for the EKS Operator
+type: application
+version: $version
+appVersion: $version
+EOF
+        
+        # Create a simple values.yaml file
+        cat > test-charts/eks-operator/values.yaml <<EOF
+# Test values file
+image:
+  repository: your-docker-username/eks-operator
+  tag: $GITHUB_REF_NAME
+EOF
+        
+        echo "Test chart files created"
+        
+        # Create or switch to the charts branch
         if ! git ls-remote --exit-code --heads origin "$charts_branch"; then
+          echo "Creating new branch: $charts_branch"
           git checkout --orphan "$charts_branch"
           git rm -rf .
-
+          
           echo "# EKS Operator Helm Charts for $branch_version versions" > README.md
-          echo "The documentation is centralized in a unique place, checkout https://github.com/rancher/eks-operator." >> README.md
-
-          git checkout origin/main -- LICENSE .gitignore
-
-          git add README.md LICENSE .gitignore
+          echo "This is a test branch for verifying GitHub Actions workflow." >> README.md
+          
+          mkdir -p charts
+          git add README.md
           git commit -m "Initial commit for $charts_branch"
         else
-          git checkout .
+          echo "Switching to existing branch: $charts_branch"
           git checkout "$charts_branch"
         fi
-
-        mkdir -p charts
-        for f in $(find bin/ -name '*.tgz'); do
-          tar -xf $f -C charts/
-        done
-
-        git add charts/**/*
+        
+        # Copy test charts to charts directory
+        mkdir -p charts/eks-operator
+        cp -r test-charts/eks-operator/* charts/eks-operator/
+        
+        # Add and commit changes
+        git add charts/
         git commit -m "Update charts to version $version"
-
+        
+        # Push to the charts branch
         git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
         git push origin "$charts_branch"
+        
+        echo "Successfully pushed to $charts_branch branch"
