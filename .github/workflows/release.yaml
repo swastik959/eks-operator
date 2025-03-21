@@ -6,9 +6,23 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  publish-images:
     permissions:
-      contents: write  # required for creating GH release and pushing branches
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        include:
+          # Three images are created:
+          # - Multi-arch manifest for both amd64 and arm64
+          - tag-suffix: ""
+            platforms: linux/amd64,linux/arm64
+          # - arm64 manifest
+          - tag-suffix: "-arm64"
+            platforms: linux/arm64
+          # - amd64 manifest
+          - tag-suffix: "-amd64"
+            platforms: linux/amd64
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -16,88 +30,77 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.ref_name}}
-        
-    - name: Set up Go
-      uses: actions/setup-go@v4
+    # Dummy step that always succeeds
+    - name: Skip image publishing
+      run: echo "Skipping image publishing step for testing purposes"
+
+  release:
+    permissions:
+      contents: write # required for creating GH release
+    runs-on: ubuntu-latest
+    needs: publish-images
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
-        go-version: '1.21'
-        
-    - name: Create release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # This is provided by GitHub automatically
-        GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+        fetch-depth: 0
+        ref: ${{ github.ref_name}}
+    # Skip the goreleaser step and set a dummy value for version
+    - name: Mock version
       id: goreleaser
-      uses: goreleaser/goreleaser-action@v6
-      with:
-        distribution: goreleaser
-        version: "~> v2"
-        args: release --clean --verbose
-        
+      run: |
+        echo "::set-output name=metadata::{\"version\":\"$(echo ${{ github.ref_name }} | sed 's/^v//')\"}"
+    
+    # Skip uploading charts to release
+    - name: Skip chart upload
+      run: |
+        echo "Skipping chart upload step for testing purposes"
+        mkdir -p bin
+        touch bin/dummy-chart.tgz
+    
     - name: Add charts to branch
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        # Extract version from tag (e.g., v1.0.8-rc2 -> 1.0.8-rc2)
-        version=${GITHUB_REF_NAME#v}
+        version=$(echo ${{ github.ref_name }} | sed 's/^v//')
         branch_version=v$(echo "$version" | cut -d'.' -f1,2)
         charts_branch=charts/$branch_version
-        
-        echo "Preparing to create/update branch: $charts_branch"
-        
-        # Set up Git identity
-        git config --global user.name "GitHub Actions Bot"
-        git config --global user.email "actions@github.com"
-        
-        # Create mock chart directory and files for testing
-        mkdir -p test-charts/eks-operator
-        
-        # Create a simple Chart.yaml file
-        cat > test-charts/eks-operator/Chart.yaml <<EOF
-apiVersion: v2
-name: eks-operator
-description: A Helm chart for the EKS Operator
-type: application
-version: $version
-appVersion: $version
-EOF
-        
-        # Create a simple values.yaml file
-        cat > test-charts/eks-operator/values.yaml <<EOF
-# Test values file
-image:
-  repository: your-docker-username/eks-operator
-  tag: $GITHUB_REF_NAME
-EOF
-        
-        echo "Test chart files created"
-        
-        # Create or switch to the charts branch
+
+        if [ ! -e ~/.gitconfig ]; then
+          git config --global user.name "eks-operator-bot"
+          git config --global user.email eks-operator@suse.de
+        fi
+
+        echo "Publishing helm chart in the branch $charts_branch"
         if ! git ls-remote --exit-code --heads origin "$charts_branch"; then
-          echo "Creating new branch: $charts_branch"
           git checkout --orphan "$charts_branch"
           git rm -rf .
-          
+
           echo "# EKS Operator Helm Charts for $branch_version versions" > README.md
-          echo "This is a test branch for verifying GitHub Actions workflow." >> README.md
+          echo "The documentation is centralized in a unique place, checkout https://github.com/rancher/eks-operator." >> README.md
+
+          git checkout origin/main -- LICENSE .gitignore || echo "Could not checkout LICENSE and .gitignore, creating dummy files"
           
-          mkdir -p charts
-          git add README.md
+          # Create dummy files if checkout fails
+          if [ ! -f LICENSE ]; then
+            echo "Dummy LICENSE file" > LICENSE
+          fi
+          if [ ! -f .gitignore ]; then
+            echo "Dummy .gitignore file" > .gitignore
+          fi
+
+          git add README.md LICENSE .gitignore
           git commit -m "Initial commit for $charts_branch"
         else
-          echo "Switching to existing branch: $charts_branch"
+          git checkout .
           git checkout "$charts_branch"
         fi
-        
-        # Copy test charts to charts directory
-        mkdir -p charts/eks-operator
-        cp -r test-charts/eks-operator/* charts/eks-operator/
-        
-        # Add and commit changes
-        git add charts/
+
+        mkdir -p charts
+        echo "This is a test chart for version $version" > charts/test-chart.yaml
+
+        git add charts/**/*
         git commit -m "Update charts to version $version"
-        
-        # Push to the charts branch
+
         git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
         git push origin "$charts_branch"
-        
-        echo "Successfully pushed to $charts_branch branch"
