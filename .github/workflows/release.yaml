@@ -66,7 +66,7 @@ jobs:
 
             git checkout origin/main -- LICENSE .gitignore
 
-            git add README.md LICENSE .gitignore
+            git add README.md License .gitignore
             git commit -m "Initial commit for $charts_branch"
           else
             git checkout .
