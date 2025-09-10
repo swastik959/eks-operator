@@ -1,11 +1,15 @@
 module github.com/rancher/eks-operator
 
-go 1.24.0
+go 1.24.6
 
-toolchain go1.24.2
+toolchain go1.24.6
 
-replace k8s.io/client-go => k8s.io/client-go v0.33.1
-
+replace (
+	k8s.io/client-go => k8s.io/client-go v0.34.0
+	github.com/rancher/lasso => github.com/krunalhinguu/lasso v0.0.0-20250904230131-2e5b75853dc0
+	github.com/rancher/wrangler/v3 => github.com/krunalhinguu/wrangler/v3 v3.3.1-0.20250905101441-b1b29faa8ccd
+	github.com/rancher/norman => github.com/swastik959/norman v0.0.0-20250908065538-4a8ca43cc36b
+)
 require (
 	github.com/aws/aws-sdk-go v1.50.38
 	github.com/aws/aws-sdk-go-v2 v1.38.3
@@ -34,7 +38,7 @@ require (
 	k8s.io/apimachinery v0.33.1
 	k8s.io/apiserver v0.33.1
 	k8s.io/client-go v12.0.0+incompatible
-	sigs.k8s.io/controller-runtime v0.21.0
+	sigs.k8s.io/controller-runtime v0.22.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
