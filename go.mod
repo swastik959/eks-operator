@@ -1,6 +1,6 @@
 module github.com/rancher/eks-operator
 
-go 1.24.6
+go 1.24.9
 
 replace (
 	github.com/rancher/lasso => github.com/krunalhinguu/lasso v0.0.0-20250904230131-2e5b75853dc0
