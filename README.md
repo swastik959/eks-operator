@@ -34,10 +34,12 @@ default credential chain (IAM instance profile, IRSA, EKS Pod Identity, ECS task
 role, environment variables, etc.). This mode is enabled when the referenced
 secret either:
 
-- contains `amazonec2credentialConfig-useInstanceProfile: "true"` (any
-  `accessKey`/`secretKey` fields in the same secret are ignored), or
+- contains `amazonec2credentialConfig-useInstanceProfile: "true"`, or
 - has both `amazonec2credentialConfig-accessKey` and
   `amazonec2credentialConfig-secretKey` empty or absent.
+
+When `amazonec2credentialConfig-useInstanceProfile` is set to `"true"`, any
+`accessKey`/`secretKey` fields in the same secret are ignored.
 
 When running in this mode, the identity used by the operator pod must be
 authorized for the AWS APIs the operator calls

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -54,7 +55,7 @@ var _ = Describe("newAWSConfigV2", func() {
 		cfg, err := newAWSConfigV2(ctx, coreFactory.Core().V1().Secret(), spec)
 		Expect(err).NotTo(HaveOccurred())
 		// No static provider override was applied.
-		_, isStatic := cfg.Credentials.(interface{ IsStatic() bool })
+		_, isStatic := cfg.Credentials.(credentials.StaticCredentialsProvider)
 		Expect(isStatic).To(BeFalse())
 	})
 
@@ -71,13 +72,9 @@ var _ = Describe("newAWSConfigV2", func() {
 		}
 		cfg, err := newAWSConfigV2(ctx, coreFactory.Core().V1().Secret(), spec)
 		Expect(err).NotTo(HaveOccurred())
-		// Confirm we did not load the stray static credentials.
-		if cfg.Credentials != nil {
-			creds, retrieveErr := cfg.Credentials.Retrieve(ctx)
-			if retrieveErr == nil {
-				Expect(creds.AccessKeyID).NotTo(Equal("ignored"))
-			}
-		}
+		// Stray static keys must not have been loaded into a static provider.
+		_, isStatic := cfg.Credentials.(credentials.StaticCredentialsProvider)
+		Expect(isStatic).To(BeFalse())
 	})
 
 	It("returns an error when only one of accessKey/secretKey is populated", func() {
