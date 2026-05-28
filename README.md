@@ -22,6 +22,32 @@ You can use the following command to deploy a Kind cluster with Rancher manager 
 
 After this, you can also downscale operator deployment and run operator from a local binary.
 
+## AWS credentials
+
+By default the operator authenticates to AWS using the static access key and
+secret access key stored in the Kubernetes secret referenced by
+`EKSClusterConfigSpec.AmazonCredentialSecret` under the keys
+`amazonec2credentialConfig-accessKey` and `amazonec2credentialConfig-secretKey`.
+
+To avoid long-lived AWS credentials, the operator can also use the AWS SDK
+default credential chain (IAM instance profile, IRSA, EKS Pod Identity, ECS task
+role, environment variables, etc.). This mode is enabled when the referenced
+secret either:
+
+- contains `amazonec2credentialConfig-useInstanceProfile: "true"`, or
+- has both `amazonec2credentialConfig-accessKey` and
+  `amazonec2credentialConfig-secretKey` empty or absent.
+
+When `amazonec2credentialConfig-useInstanceProfile` is set to `"true"`, any
+`accessKey`/`secretKey` fields in the same secret are ignored.
+
+When running in this mode, the identity used by the operator pod must be
+authorized for the AWS APIs the operator calls
+(`eks:*`, `cloudformation:*`, `ec2:*` for the resources it manages, and
+`iam:PassRole` for the EKS cluster/node roles). For least privilege we
+recommend providing this identity via **EKS Pod Identity** or **IRSA** rather
+than the underlying node instance profile.
+
 ## Tests
 
 Running unit tests can be done using the following command:
