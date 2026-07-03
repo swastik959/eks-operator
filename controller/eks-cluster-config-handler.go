@@ -482,8 +482,10 @@ func (h *Handler) validateCreate(ctx context.Context, config *eksv1.EKSClusterCo
 	if err != nil {
 		return fmt.Errorf("cannot list eksclusterconfigs for display name check")
 	}
-	// newAccountID resolves lazily and only once, and account IDs for existing
-	// clusters are cached by their credential secret reference.
+	// newAccountID caches the account ID of the new cluster being validated;
+	// it is resolved lazily and only once (newAccountIDResolved guards against
+	// re-resolving after a failure). Account IDs for existing clusters are
+	// cached separately in accountIDCache, keyed by their credential secret.
 	var newAccountID string
 	var newAccountIDResolved bool
 	accountIDForSpec := h.accountIDForSpec
