@@ -39,6 +39,11 @@ const (
 	eksConfigUpdatingPhase   = "updating"
 	eksConfigImportingPhase  = "importing"
 	eksClusterConfigKind     = "EKSClusterConfig"
+
+	// stsAccountIDTimeout bounds the STS GetCallerIdentity call used during
+	// duplicate name validation so a slow or hung STS endpoint cannot stall
+	// the reconcile loop.
+	stsAccountIDTimeout = 10 * time.Second
 )
 
 type Handler struct {
@@ -47,6 +52,10 @@ type Handler struct {
 	eksEnqueue      func(namespace, name string)
 	secrets         wranglerv1.SecretClient
 	secretsCache    wranglerv1.SecretCache
+	// accountIDForSpec resolves the AWS account ID for the credentials
+	// referenced by an existing cluster spec. It defaults to
+	// getAWSAccountIDForSpec and is overridable in tests.
+	accountIDForSpec func(ctx context.Context, spec eksv1.EKSClusterConfigSpec) string
 }
 
 type awsServices struct {
@@ -476,6 +485,11 @@ func (h *Handler) validateCreate(ctx context.Context, config *eksv1.EKSClusterCo
 	// newAccountID resolves lazily and only once, and account IDs for existing
 	// clusters are cached by their credential secret reference.
 	var newAccountID string
+	var newAccountIDResolved bool
+	accountIDForSpec := h.accountIDForSpec
+	if accountIDForSpec == nil {
+		accountIDForSpec = h.getAWSAccountIDForSpec
+	}
 	accountIDCache := make(map[string]string)
 	for _, c := range eksConfigs.Items {
 		if c.Name == config.Name || c.Spec.DisplayName != config.Spec.DisplayName {
@@ -495,12 +509,13 @@ func (h *Handler) validateCreate(ctx context.Context, config *eksv1.EKSClusterCo
 		// error does not block cluster creation. Account IDs are cached per
 		// credential secret to avoid redundant STS calls for clusters that
 		// share credentials.
-		if newAccountID == "" {
+		if !newAccountIDResolved {
 			newAccountID = h.getAWSAccountID(ctx, awsSVCs.sts)
+			newAccountIDResolved = true
 		}
 		existingAccountID, cached := accountIDCache[c.Spec.AmazonCredentialSecret]
 		if !cached {
-			existingAccountID = h.getAWSAccountIDForSpec(ctx, c.Spec)
+			existingAccountID = accountIDForSpec(ctx, c.Spec)
 			accountIDCache[c.Spec.AmazonCredentialSecret] = existingAccountID
 		}
 		if newAccountID != "" && newAccountID == existingAccountID {
@@ -640,6 +655,10 @@ func (h *Handler) getAWSAccountID(ctx context.Context, stsSVC services.STSServic
 	if stsSVC == nil {
 		return ""
 	}
+	// Bound the STS call so a slow or unresponsive endpoint cannot stall the
+	// reconcile loop when the passed-in context has no deadline of its own.
+	ctx, cancel := context.WithTimeout(ctx, stsAccountIDTimeout)
+	defer cancel()
 	out, err := stsSVC.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		logrus.Warnf("EKS duplicate name validation: failed to get AWS account ID: %v", err)
