@@ -473,6 +473,10 @@ func (h *Handler) validateCreate(ctx context.Context, config *eksv1.EKSClusterCo
 	if err != nil {
 		return fmt.Errorf("cannot list eksclusterconfigs for display name check")
 	}
+	// newAccountID resolves lazily and only once, and account IDs for existing
+	// clusters are cached by their credential secret reference.
+	var newAccountID string
+	accountIDCache := make(map[string]string)
 	for _, c := range eksConfigs.Items {
 		if c.Name == config.Name || c.Spec.DisplayName != config.Spec.DisplayName {
 			continue
@@ -488,9 +492,17 @@ func (h *Handler) validateCreate(ctx context.Context, config *eksv1.EKSClusterCo
 		// On a name+region collision with different credentials, compare the
 		// resolved AWS account IDs. A failure to resolve either account ID
 		// falls back to treating them as different accounts so a transient
-		// error does not block cluster creation.
-		newAccountID := h.getAWSAccountID(ctx, awsSVCs.sts)
-		existingAccountID := h.getAWSAccountIDForSpec(ctx, c.Spec)
+		// error does not block cluster creation. Account IDs are cached per
+		// credential secret to avoid redundant STS calls for clusters that
+		// share credentials.
+		if newAccountID == "" {
+			newAccountID = h.getAWSAccountID(ctx, awsSVCs.sts)
+		}
+		existingAccountID, cached := accountIDCache[c.Spec.AmazonCredentialSecret]
+		if !cached {
+			existingAccountID = h.getAWSAccountIDForSpec(ctx, c.Spec)
+			accountIDCache[c.Spec.AmazonCredentialSecret] = existingAccountID
+		}
 		if newAccountID != "" && newAccountID == existingAccountID {
 			return fmt.Errorf("cannot create cluster [%s (id: %s)] because an eksclusterconfig exists with the same name", config.Spec.DisplayName, config.Name)
 		}
@@ -642,7 +654,7 @@ func (h *Handler) getAWSAccountID(ctx context.Context, stsSVC services.STSServic
 func (h *Handler) getAWSAccountIDForSpec(ctx context.Context, spec eksv1.EKSClusterConfigSpec) string {
 	awsSVCs, err := newAWSv2Services(ctx, h.secrets, spec)
 	if err != nil {
-		logrus.Warnf("EKS duplicate name validation: failed to create AWS services: %v", err)
+		logrus.Warnf("EKS duplicate name validation: failed to create AWS services for credential [%s]: %v", spec.AmazonCredentialSecret, err)
 		return ""
 	}
 	return h.getAWSAccountID(ctx, awsSVCs.sts)
