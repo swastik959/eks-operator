@@ -40,6 +40,10 @@ spec:
           value: {{ .Values.httpsProxy }}
         - name: NO_PROXY
           value: {{ .Values.noProxy }}
+        {{- if not (kindIs "invalid" .Values.useDualStackEndpoint) }}
+        - name: AWS_USE_DUALSTACK_ENDPOINT
+          value: {{ .Values.useDualStackEndpoint | quote }}
+        {{- end }}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
