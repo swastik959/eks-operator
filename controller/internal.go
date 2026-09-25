@@ -32,14 +32,29 @@ func newAWSConfigV2(ctx context.Context, secretClient wranglerv1.SecretClient, s
 			return cfg, fmt.Errorf("error getting secret %s/%s: %w", ns, id, err)
 		}
 
-		accessKeyBytes := secret.Data["amazonec2credentialConfig-accessKey"]
-		secretKeyBytes := secret.Data["amazonec2credentialConfig-secretKey"]
-		if accessKeyBytes == nil || secretKeyBytes == nil {
-			return cfg, fmt.Errorf("invalid aws cloud credential")
+		// Opt-in to the AWS SDK default credential chain (IAM instance profile,
+		// IRSA, EKS Pod Identity, ECS task role, env vars, etc.) when the secret
+		// explicitly requests it via the useInstanceProfile flag. In that mode
+		// any stray accessKey/secretKey fields are ignored.
+		if useInstanceProfile := string(secret.Data["amazonec2credentialConfig-useInstanceProfile"]); useInstanceProfile == "true" {
+			return cfg, nil
 		}
 
-		accessKey := string(accessKeyBytes)
-		secretKey := string(secretKeyBytes)
+		accessKey := string(secret.Data["amazonec2credentialConfig-accessKey"])
+		secretKey := string(secret.Data["amazonec2credentialConfig-secretKey"])
+
+		// Both fields empty/absent is also treated as opting into the default
+		// credential chain. This keeps the behavior consistent with an empty
+		// AmazonCredentialSecret reference and lets Rancher store a credential
+		// resource that only carries metadata (e.g. region) without static keys.
+		if accessKey == "" && secretKey == "" {
+			return cfg, nil
+		}
+
+		// Exactly one of the two fields populated is a misconfiguration.
+		if accessKey == "" || secretKey == "" {
+			return cfg, fmt.Errorf("invalid aws cloud credential")
+		}
 
 		cfg.Credentials = credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 	}
