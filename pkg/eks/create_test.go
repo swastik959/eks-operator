@@ -1332,3 +1332,24 @@ var _ = Describe("installEBSCSIDriver", func() {
 		Expect(err).ToNot(Succeed())
 	})
 })
+
+var _ = Describe("transformOIDC", func() {
+	It("should convert the issuer into its dual-stack equivalent in the standard AWS partition", func() {
+		issuer := "https://oidc.eks.us-east-1.amazonaws.com/id/AAABBBCCCDDDEEEFFF11122233344455"
+		Expect(*transformOIDC(&issuer, "us-east-1")).To(Equal("https://oidc-eks.us-east-1.api.aws/id/AAABBBCCCDDDEEEFFF11122233344455"))
+	})
+
+	It("should keep the issuer unchanged in the AWS China partition", func() {
+		issuer := "https://oidc.eks.cn-northwest-1.amazonaws.com.cn/id/AAABBBCCCDDDEEEFFF11122233344455"
+		Expect(*transformOIDC(&issuer, "cn-northwest-1")).To(Equal(issuer))
+	})
+
+	It("should keep the issuer unchanged in the AWS GovCloud partition", func() {
+		issuer := "https://oidc.eks.us-gov-west-1.amazonaws.com/id/AAABBBCCCDDDEEEFFF11122233344455"
+		Expect(*transformOIDC(&issuer, "us-gov-west-1")).To(Equal(issuer))
+	})
+
+	It("should keep a nil issuer unchanged", func() {
+		Expect(transformOIDC(nil, "us-east-1")).To(BeNil())
+	})
+})

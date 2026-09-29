@@ -557,7 +557,7 @@ func ConfigureOIDCProvider(ctx context.Context, iamService services.IAMServiceIn
 
 	thumbprintIssuer := oidcIssuer
 	if templates.IsIPv6(config.Spec.IPFamily) {
-		thumbprintIssuer = transformOIDC(oidcIssuer)
+		thumbprintIssuer = transformOIDC(oidcIssuer, config.Spec.Region)
 	}
 
 	thumbprint, err := getIssuerThumbprint(*thumbprintIssuer)
@@ -654,14 +654,25 @@ func installEBSAddon(ctx context.Context, eksService services.EKSServiceInterfac
 	return *addonOutput.Addon.AddonArn, nil
 }
 
-func transformOIDC(issuerURL *string) *string {
+// transformOIDC converts a standard EKS OIDC issuer URL into its dual-stack
+// equivalent. The issuer is returned unchanged for the partitions without
+// usable dual-stack endpoints, e.g. AWS China, where the dual-stack host does
+// not resolve.
+func transformOIDC(issuerURL *string, region string) *string {
 	if issuerURL == nil {
 		return nil
 	}
+
+	dualStackDNSSuffix := utils.DualStackDNSSuffix(region)
+	if dualStackDNSSuffix == "" {
+		return issuerURL
+	}
+
 	// 1. Replace "https://oidc.eks." with "https://oidc-eks."
 	url := strings.Replace(*issuerURL, "https://oidc.eks.", "https://oidc-eks.", 1)
 
-	// 2. Replace ".amazonaws.com/" with ".api.aws/"
-	url = strings.Replace(url, ".amazonaws.com/", ".api.aws/", 1)
+	// 2. Replace the partition DNS suffix with its dual-stack counterpart,
+	// for example ".amazonaws.com/" with ".api.aws/"
+	url = strings.Replace(url, "."+utils.AWSDNSSuffix(region)+"/", "."+dualStackDNSSuffix+"/", 1)
 	return &url
 }
