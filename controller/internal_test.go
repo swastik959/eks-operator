@@ -55,11 +55,11 @@ var _ = Describe("newAWSConfigV2", func() {
 		}
 	})
 
-	It("should not use dual-stack endpoints in the AWS GovCloud partition", func() {
+	It("should use dual-stack endpoints in the AWS GovCloud partition", func() {
 		cfg, err := newAWSConfigV2(ctx, nil, eksv1.EKSClusterConfigSpec{Region: "us-gov-west-1"})
 		Expect(err).ToNot(HaveOccurred())
-		Expect(dualStackEndpointState(cfg)).To(Equal(aws.DualStackEndpointStateUnset))
-		Expect(resolveEC2Endpoint(cfg)).To(Equal("https://ec2.us-gov-west-1.amazonaws.com"))
+		Expect(dualStackEndpointState(cfg)).To(Equal(aws.DualStackEndpointStateEnabled))
+		Expect(resolveEC2Endpoint(cfg)).To(Equal("https://ec2.us-gov-west-1.api.aws"))
 	})
 
 	It("should select the endpoints from the configured region when the spec has none", func() {

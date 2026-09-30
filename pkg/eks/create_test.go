@@ -1344,9 +1344,9 @@ var _ = Describe("transformOIDC", func() {
 		Expect(*transformOIDC(&issuer, "cn-northwest-1")).To(Equal(issuer))
 	})
 
-	It("should keep the issuer unchanged in the AWS GovCloud partition", func() {
+	It("should convert the issuer into its dual-stack equivalent in the AWS GovCloud partition", func() {
 		issuer := "https://oidc.eks.us-gov-west-1.amazonaws.com/id/AAABBBCCCDDDEEEFFF11122233344455"
-		Expect(*transformOIDC(&issuer, "us-gov-west-1")).To(Equal(issuer))
+		Expect(*transformOIDC(&issuer, "us-gov-west-1")).To(Equal("https://oidc-eks.us-gov-west-1.api.aws/id/AAABBBCCCDDDEEEFFF11122233344455"))
 	})
 
 	It("should keep a nil issuer unchanged", func() {
