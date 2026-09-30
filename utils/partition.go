@@ -30,13 +30,3 @@ func AWSARNPrefix(region string) string {
 func SupportsDualStackEndpoints(region string) bool {
 	return AWSPartitionForRegion(region).ID() != endpoints.AwsCnPartitionID
 }
-
-// DualStackDNSSuffix returns the DNS suffix used by the dual-stack endpoints of
-// the partition the given region belongs to. It returns an empty string for the
-// AWS China partition, which has no usable dual-stack endpoints.
-func DualStackDNSSuffix(region string) string {
-	if !SupportsDualStackEndpoints(region) {
-		return ""
-	}
-	return "api.aws"
-}
